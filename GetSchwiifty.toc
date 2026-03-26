@@ -1,0 +1,8 @@
+## Interface: 120000
+## Title: Get Schwiifty
+## Notes: Schwiiftys personlige multi-værktøj og M+ tracker.
+## Author: Schwiifty
+## Version: 1.0
+## SavedVariables: GetSchwiiftyDB
+
+core.lua
