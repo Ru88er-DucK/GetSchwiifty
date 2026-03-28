@@ -1,13 +1,12 @@
 local addonName, GS = ...
 
--- Sikre databaser og undermapper
 local LoadFrame = CreateFrame("Frame")
 LoadFrame:RegisterEvent("ADDON_LOADED")
 LoadFrame:SetScript("OnEvent", function(self, event, name)
     if name == addonName then
         GetSchwiiftyDB = GetSchwiiftyDB or {}
-        GetSchwiiftyDB.MyProfessions = GetSchwiiftyDB.MyProfessions or {} -- Mine egne gemte links
-        GetSchwiiftyDB.GuildCrafters = GetSchwiiftyDB.GuildCrafters or {} -- Andres gemte links
+        GetSchwiiftyDB.MyProfessions = GetSchwiiftyDB.MyProfessions or {} 
+        GetSchwiiftyDB.GuildCrafters = GetSchwiiftyDB.GuildCrafters or {} 
         
         if GetSchwiiftyDB.AutoAnnounceGuildOrders and GS_AutoAnnounceCheck then
             GS_AutoAnnounceCheck:SetChecked(true)
@@ -41,7 +40,6 @@ end)
 -------------------------------------------------
 -- DEN NYE AVANCEREDE "PROFESSION TYV"
 -------------------------------------------------
--- 1. Fanger dine links, HVER gang du åbner en ny profession, og husker dem!
 local ProfScanner = CreateFrame("Frame")
 ProfScanner:RegisterEvent("TRADE_SKILL_SHOW")
 ProfScanner:SetScript("OnEvent", function()
@@ -49,40 +47,46 @@ ProfScanner:SetScript("OnEvent", function()
     local link = C_TradeSkillUI.GetTradeSkillListLink()
     
     if profInfo and profInfo.professionName and link then
-        -- Gemmer det under professionens navn (så vi kan huske både Alchemy og Herbalism)
+        -- Vi klipper servernavnet af vores eget navn for en sikkerheds skyld
+        local myShortName = strsplit("-", UnitName("player"))
+        
         GetSchwiiftyDB.MyProfessions[profInfo.professionName] = link
         
-        -- Sender det ud i æteren med det samme
-        local packet = "PROF;" .. UnitName("player") .. ";" .. profInfo.professionName .. ";" .. link
+        -- Vi gemmer det også i Guild-listen under os selv med det samme
+        GetSchwiiftyDB.GuildCrafters[myShortName] = GetSchwiiftyDB.GuildCrafters[myShortName] or {}
+        GetSchwiiftyDB.GuildCrafters[myShortName][profInfo.professionName] = link
+        
+        -- Fortæl brugeren at vi har fanget det!
+        print("|cFF00FFFF[Get Schwiifty]|r Profession link saved: " .. profInfo.professionName)
+        
+        local packet = "PROF;" .. myShortName .. ";" .. profInfo.professionName .. ";" .. link
         C_ChatInfo.SendAddonMessage("GetSchwiifty", packet, "GUILD")
+        
+        if GS.OpdaterCrafterTabel then GS.OpdaterCrafterTabel() end
     end
 end)
 
--- 2. Lytter efter netværksanmodninger og andres links
 local CraftingListener = CreateFrame("Frame")
 CraftingListener:RegisterEvent("CHAT_MSG_ADDON")
 CraftingListener:SetScript("OnEvent", function(self, event, prefix, text, channel, sender)
     if prefix == "GetSchwiifty" and GetSchwiiftyDB then
-        
-        -- Modtager et profession link
         if string.sub(text, 1, 5) == "PROF;" then
             local _, pName, profName, link = strsplit(";", text, 4) 
             if pName and profName and link then
-                local finalName = pName or sender
+                -- Sørger for at fjerne servernavnet fra senderen også
+                local shortName = strsplit("-", pName)
                 
-                GetSchwiiftyDB.GuildCrafters[finalName] = GetSchwiiftyDB.GuildCrafters[finalName] or {}
-                GetSchwiiftyDB.GuildCrafters[finalName][profName] = link
+                GetSchwiiftyDB.GuildCrafters[shortName] = GetSchwiiftyDB.GuildCrafters[shortName] or {}
+                GetSchwiiftyDB.GuildCrafters[shortName][profName] = link
                 
                 if GS.OpdaterCrafterTabel then GS.OpdaterCrafterTabel() end
             end
-            
-        -- Nogen trykker "Refresh" og anmoder om alt vores data
         elseif text == "SYNC_REQUEST" then
             if GetSchwiiftyDB.MyProfessions then
-                -- Vi looper igennem alle de professions, vi har gemt i hukommelsen
+                local myShortName = strsplit("-", UnitName("player"))
                 for pName, pLink in pairs(GetSchwiiftyDB.MyProfessions) do
                     C_Timer.After(math.random() * 2, function()
-                        local packet = "PROF;" .. UnitName("player") .. ";" .. pName .. ";" .. pLink
+                        local packet = "PROF;" .. myShortName .. ";" .. pName .. ";" .. pLink
                         C_ChatInfo.SendAddonMessage("GetSchwiifty", packet, "GUILD")
                     end)
                 end
@@ -92,7 +96,7 @@ CraftingListener:SetScript("OnEvent", function(self, event, prefix, text, channe
 end)
 
 -------------------------------------------------
--- AUTO-ANNOUNCE LOGIK FOR CRAFTING ORDERS
+-- AUTO-ANNOUNCE LOGIK
 -------------------------------------------------
 if C_CraftingOrders and C_CraftingOrders.PlaceNewOrder then
     hooksecurefunc(C_CraftingOrders, "PlaceNewOrder", function(orderInfo)
@@ -176,7 +180,6 @@ for i = 1, numRows do
                         print("|cFF00FFFF[Get Schwiifty]|r Found recipes for " .. self.crafterName .. ":")
                         for pName, pLink in pairs(cData) do
                             print("- " .. pLink)
-                            -- Simulerer et klik på linket for at åbne deres vindue automatisk
                             local linkString = pLink:match("|H(.-)|h")
                             if linkString then SetItemRef(linkString, pLink, "LeftButton") end
                         end
@@ -219,32 +222,33 @@ GS.OpdaterCrafterTabel = function()
             local row = raekker[rowIndex]
             local colorInfo = RAID_CLASS_COLORS[classToken]
             local hexColor = colorInfo and colorInfo.colorStr or "ffffffff"
+            
+            -- HUSK AT KLIPPE SERVERNAVNET AF HER OGSÅ
             local shortName = strsplit("-", name)
             
             row.felter[1]:SetText(string.format("|c%s%s|r", hexColor, shortName))
             row.felter[2]:SetText(rankName)
             row.felter[3]:SetText("Lvl " .. level .. " " .. classDisplayName)
             
-            -- Tjek om vi har stjålet nogle profession links!
-            local crafterData = GetSchwiiftyDB.GuildCrafters[name]
+            -- Nu leder vi kun efter "Schwiifty", ikke "Schwiifty-TwistingNether"
+            local crafterData = GetSchwiiftyDB.GuildCrafters[shortName]
             if crafterData and next(crafterData) then
-                -- Samler navnene på de professions vi kender til en string
                 local knownProfs = ""
                 for pName, _ in pairs(crafterData) do
                     knownProfs = knownProfs .. pName .. ", "
                 end
-                knownProfs = knownProfs:sub(1, -3) -- Fjerner det sidste komma
+                knownProfs = knownProfs:sub(1, -3) 
                 
                 row.felter[4]:SetText("|cff71d5ff" .. knownProfs .. "|r")
                 row.felter[5].recipe:Enable()
-                row.felter[5].recipe.crafterName = name
+                row.felter[5].recipe.crafterName = shortName
             else
                 row.felter[4]:SetText("|cFF888888Unknown|r")
                 row.felter[5].recipe:Disable()
                 row.felter[5].recipe.crafterName = nil
             end
             
-            row.felter[5].whisper.spillerNavn = name 
+            row.felter[5].whisper.spillerNavn = shortName 
             
             row:Show()
             rowIndex = rowIndex + 1
