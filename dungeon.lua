@@ -218,9 +218,18 @@ local raekker = {}
 local rowHeight = 25
 
 for i = 1, numRows do
-    local row = CreateFrame("Frame", nil, ScrollChild)
+    -- NYT: Vi tilføjer "BackdropTemplate" for at kunne give rækkerne en baggrundsfarve
+    local row = CreateFrame("Frame", nil, ScrollChild, "BackdropTemplate")
     row:SetSize(890, rowHeight) 
     row:SetPoint("TOPLEFT", ScrollChild, "TOPLEFT", 0, -((i-1) * rowHeight))
+    
+    -- NYT: Giv hver anden række en svag gennemsigtig baggrund for at skabe striber
+    row:SetBackdrop({bgFile = "Interface\\ChatFrame\\ChatFrameBackground"})
+    if i % 2 == 0 then
+        row:SetBackdropColor(1, 1, 1, 0.04) -- Lidt lysere
+    else
+        row:SetBackdropColor(1, 1, 1, 0.01) -- Næsten usynlig
+    end
     
     row.felter = {}
     local feltX = 0

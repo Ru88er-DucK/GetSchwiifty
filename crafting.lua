@@ -1,12 +1,14 @@
 local addonName, GS = ...
 
--- Sikre databaser
+-- Sikre databaser og undermapper
 local LoadFrame = CreateFrame("Frame")
 LoadFrame:RegisterEvent("ADDON_LOADED")
 LoadFrame:SetScript("OnEvent", function(self, event, name)
     if name == addonName then
         GetSchwiiftyDB = GetSchwiiftyDB or {}
-        GetSchwiiftyDB.Crafters = GetSchwiiftyDB.Crafters or {} -- Her gemmer vi alle profession links
+        GetSchwiiftyDB.MyProfessions = GetSchwiiftyDB.MyProfessions or {} -- Mine egne gemte links
+        GetSchwiiftyDB.GuildCrafters = GetSchwiiftyDB.GuildCrafters or {} -- Andres gemte links
+        
         if GetSchwiiftyDB.AutoAnnounceGuildOrders and GS_AutoAnnounceCheck then
             GS_AutoAnnounceCheck:SetChecked(true)
         end
@@ -37,38 +39,53 @@ GS_AutoAnnounceCheck:SetScript("OnClick", function(self)
 end)
 
 -------------------------------------------------
--- DEN USYNLIGE "PROFESSION TYV" OG P2P LYTTER
+-- DEN NYE AVANCEREDE "PROFESSION TYV"
 -------------------------------------------------
--- 1. Fanger dit link når du åbner din profession
+-- 1. Fanger dine links, HVER gang du åbner en ny profession, og husker dem!
 local ProfScanner = CreateFrame("Frame")
 ProfScanner:RegisterEvent("TRADE_SKILL_SHOW")
 ProfScanner:SetScript("OnEvent", function()
+    local profInfo = C_TradeSkillUI.GetBaseProfessionInfo()
     local link = C_TradeSkillUI.GetTradeSkillListLink()
-    if link then
-        GetSchwiiftyDB.MyProfLink = link
-        local packet = "PROF;" .. UnitName("player") .. ";" .. link
+    
+    if profInfo and profInfo.professionName and link then
+        -- Gemmer det under professionens navn (så vi kan huske både Alchemy og Herbalism)
+        GetSchwiiftyDB.MyProfessions[profInfo.professionName] = link
+        
+        -- Sender det ud i æteren med det samme
+        local packet = "PROF;" .. UnitName("player") .. ";" .. profInfo.professionName .. ";" .. link
         C_ChatInfo.SendAddonMessage("GetSchwiifty", packet, "GUILD")
     end
 end)
 
--- 2. Lytter efter andres links på netværket
+-- 2. Lytter efter netværksanmodninger og andres links
 local CraftingListener = CreateFrame("Frame")
 CraftingListener:RegisterEvent("CHAT_MSG_ADDON")
 CraftingListener:SetScript("OnEvent", function(self, event, prefix, text, channel, sender)
     if prefix == "GetSchwiifty" and GetSchwiiftyDB then
+        
+        -- Modtager et profession link
         if string.sub(text, 1, 5) == "PROF;" then
-            local _, pName, link = strsplit(";", text, 3) 
-            if pName and link then
+            local _, pName, profName, link = strsplit(";", text, 4) 
+            if pName and profName and link then
                 local finalName = pName or sender
-                GetSchwiiftyDB.Crafters[finalName] = link
+                
+                GetSchwiiftyDB.GuildCrafters[finalName] = GetSchwiiftyDB.GuildCrafters[finalName] or {}
+                GetSchwiiftyDB.GuildCrafters[finalName][profName] = link
+                
                 if GS.OpdaterCrafterTabel then GS.OpdaterCrafterTabel() end
             end
+            
+        -- Nogen trykker "Refresh" og anmoder om alt vores data
         elseif text == "SYNC_REQUEST" then
-            if GetSchwiiftyDB.MyProfLink then
-                C_Timer.After(math.random() * 2, function()
-                    local packet = "PROF;" .. UnitName("player") .. ";" .. GetSchwiiftyDB.MyProfLink
-                    C_ChatInfo.SendAddonMessage("GetSchwiifty", packet, "GUILD")
-                end)
+            if GetSchwiiftyDB.MyProfessions then
+                -- Vi looper igennem alle de professions, vi har gemt i hukommelsen
+                for pName, pLink in pairs(GetSchwiiftyDB.MyProfessions) do
+                    C_Timer.After(math.random() * 2, function()
+                        local packet = "PROF;" .. UnitName("player") .. ";" .. pName .. ";" .. pLink
+                        C_ChatInfo.SendAddonMessage("GetSchwiifty", packet, "GUILD")
+                    end)
+                end
             end
         end
     end
@@ -102,12 +119,11 @@ RefreshCraftersBtn:SetText("Refresh Crafters")
 local headerY = -110 
 local startX = 20
 
--- Vi har tilføjet en kolonne og justeret bredden for at få plads til to knapper!
 local kolonner = {
     {navn = "Crafter Name", bredde = 140},
     {navn = "Guild Rank", bredde = 130},
     {navn = "Level / Class", bredde = 160},
-    {navn = "Profession", bredde = 180},
+    {navn = "Known Professions", bredde = 180},
     {navn = "Action", bredde = 160} 
 }
 
@@ -126,15 +142,21 @@ local raekker = {}
 local rowY = headerY - 25
 
 for i = 1, numRows do
-    local row = CreateFrame("Frame", nil, GS.CraftingTabContainer)
+    local row = CreateFrame("Frame", nil, GS.CraftingTabContainer, "BackdropTemplate")
     row:SetSize(910, 20)
     row:SetPoint("TOPLEFT", GS.CraftingTabContainer, "TOPLEFT", startX, rowY - ((i-1) * 20))
+    
+    row:SetBackdrop({bgFile = "Interface\\ChatFrame\\ChatFrameBackground"})
+    if i % 2 == 0 then
+        row:SetBackdropColor(1, 1, 1, 0.04) 
+    else
+        row:SetBackdropColor(1, 1, 1, 0.01) 
+    end
     
     row.felter = {}
     local feltX = 0
     for j, info in ipairs(kolonner) do
         if j == 5 then 
-            -- To knapper i den sidste kolonne!
             local whisperBtn = CreateFrame("Button", nil, row, "UIPanelButtonTemplate")
             whisperBtn:SetSize(75, 20)
             whisperBtn:SetPoint("LEFT", row, "LEFT", feltX, 0)
@@ -148,10 +170,17 @@ for i = 1, numRows do
             recipeBtn:SetPoint("LEFT", whisperBtn, "RIGHT", 5, 0)
             recipeBtn:SetText("Recipes")
             recipeBtn:SetScript("OnClick", function(self)
-                if self.link then
-                    -- Magien der simulerer et klik på et profession link i chatten
-                    local linkString = self.link:match("|H(.-)|h")
-                    if linkString then SetItemRef(linkString, self.link, "LeftButton") end
+                if self.crafterName then
+                    local cData = GetSchwiiftyDB.GuildCrafters[self.crafterName]
+                    if cData then
+                        print("|cFF00FFFF[Get Schwiifty]|r Found recipes for " .. self.crafterName .. ":")
+                        for pName, pLink in pairs(cData) do
+                            print("- " .. pLink)
+                            -- Simulerer et klik på linket for at åbne deres vindue automatisk
+                            local linkString = pLink:match("|H(.-)|h")
+                            if linkString then SetItemRef(linkString, pLink, "LeftButton") end
+                        end
+                    end
                 end
             end)
 
@@ -196,17 +225,23 @@ GS.OpdaterCrafterTabel = function()
             row.felter[2]:SetText(rankName)
             row.felter[3]:SetText("Lvl " .. level .. " " .. classDisplayName)
             
-            -- Tjek om vi har stjålet deres profession link!
-            local profLink = GetSchwiiftyDB.Crafters[name]
-            if profLink then
-                local linkText = profLink:match("%[(.-)%]") or "Profession"
-                row.felter[4]:SetText("|cff71d5ff[" .. linkText .. "]|r")
+            -- Tjek om vi har stjålet nogle profession links!
+            local crafterData = GetSchwiiftyDB.GuildCrafters[name]
+            if crafterData and next(crafterData) then
+                -- Samler navnene på de professions vi kender til en string
+                local knownProfs = ""
+                for pName, _ in pairs(crafterData) do
+                    knownProfs = knownProfs .. pName .. ", "
+                end
+                knownProfs = knownProfs:sub(1, -3) -- Fjerner det sidste komma
+                
+                row.felter[4]:SetText("|cff71d5ff" .. knownProfs .. "|r")
                 row.felter[5].recipe:Enable()
-                row.felter[5].recipe.link = profLink
+                row.felter[5].recipe.crafterName = name
             else
                 row.felter[4]:SetText("|cFF888888Unknown|r")
                 row.felter[5].recipe:Disable()
-                row.felter[5].recipe.link = nil
+                row.felter[5].recipe.crafterName = nil
             end
             
             row.felter[5].whisper.spillerNavn = name 
@@ -219,5 +254,6 @@ end
 
 RefreshCraftersBtn:SetScript("OnClick", function()
     GS.OpdaterCrafterTabel()
-    print("|cFFFFFF00[Get Schwiifty]|r Refreshing guild roster...")
+    C_ChatInfo.SendAddonMessage("GetSchwiifty", "SYNC_REQUEST", "GUILD")
+    print("|cFFFFFF00[Get Schwiifty]|r Requesting updated profession data from the guild...")
 end)
