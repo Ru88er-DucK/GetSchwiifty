@@ -1,5 +1,8 @@
 local addonName, GS = ...
 
+-- HER ER MAGIEN DER LÅSER OP FOR NETVÆRKET MELLEM JER!
+C_ChatInfo.RegisterAddonMessagePrefix("GetSchwiifty")
+
 local LoadFrame = CreateFrame("Frame")
 LoadFrame:RegisterEvent("ADDON_LOADED")
 LoadFrame:SetScript("OnEvent", function(self, event, name)
@@ -13,6 +16,39 @@ LoadFrame:SetScript("OnEvent", function(self, event, name)
         end
     end
 end)
+
+-------------------------------------------------
+-- KUN FOR SCHWIIFTY: DEBUG VINDUE
+-------------------------------------------------
+if UnitName("player") == "Schwiifty" then
+    GS.DebugFrame = CreateFrame("Frame", "GS_DebugFrame", UIParent, "BackdropTemplate")
+    GS.DebugFrame:SetSize(450, 200)
+    GS.DebugFrame:SetPoint("BOTTOMRIGHT", UIParent, "BOTTOMRIGHT", -20, 20)
+    GS.DebugFrame:SetBackdrop({bgFile="Interface\\ChatFrame\\ChatFrameBackground", edgeFile="Interface\\Buttons\\WHITE8x8", edgeSize=1})
+    GS.DebugFrame:SetBackdropColor(0, 0, 0, 0.8)
+    GS.DebugFrame:SetBackdropBorderColor(1, 0, 0, 1)
+    GS.DebugFrame:EnableMouse(true)
+    GS.DebugFrame:SetMovable(true)
+    GS.DebugFrame:RegisterForDrag("LeftButton")
+    GS.DebugFrame:SetScript("OnDragStart", GS.DebugFrame.StartMoving)
+    GS.DebugFrame:SetScript("OnDragStop", GS.DebugFrame.StopMovingOrSizing)
+    
+    GS.DebugFrame.title = GS.DebugFrame:CreateFontString(nil, "OVERLAY", "GameFontNormal")
+    GS.DebugFrame.title:SetPoint("TOP", 0, -5)
+    GS.DebugFrame.title:SetText("Schwiifty Developer Log (Træk for at flytte)")
+    
+    GS.DebugLog = CreateFrame("ScrollingMessageFrame", nil, GS.DebugFrame)
+    GS.DebugLog:SetPoint("TOPLEFT", 10, -25)
+    GS.DebugLog:SetPoint("BOTTOMRIGHT", -10, 10)
+    GS.DebugLog:SetMaxLines(100)
+    GS.DebugLog:SetFontObject("ChatFontNormal")
+    GS.DebugLog:SetJustifyH("LEFT")
+    GS.DebugLog:SetFading(false)
+    
+    GS.Log = function(msg) GS.DebugLog:AddMessage(msg) end
+else
+    GS.Log = function(msg) end -- Gør ingenting for andre spillere
+end
 
 -------------------------------------------------
 -- CRAFTING UI - OVERSKRIFT & AUTO-ANNOUNCE
@@ -30,11 +66,6 @@ GS_AutoAnnounceCheck.text:SetText("Automatically announce my Guild Crafting Orde
 GS_AutoAnnounceCheck:SetScript("OnClick", function(self)
     local isChecked = self:GetChecked()
     GetSchwiiftyDB.AutoAnnounceGuildOrders = isChecked
-    if isChecked then
-        print("|cFF00FFFF[Get Schwiifty]|r Auto-announce turned ON.")
-    else
-        print("|cFFFF0000[Get Schwiifty]|r Auto-announce turned OFF.")
-    end
 end)
 
 -------------------------------------------------
@@ -46,20 +77,18 @@ ProfScanner:SetScript("OnEvent", function()
     local profInfo = C_TradeSkillUI.GetBaseProfessionInfo()
     local link = C_TradeSkillUI.GetTradeSkillListLink()
     
+    -- Hvis linket er nil (som f.eks. ved herbalism), ignorerer vi det
     if profInfo and profInfo.professionName and link then
-        -- Vi klipper servernavnet af vores eget navn for en sikkerheds skyld
         local myShortName = strsplit("-", UnitName("player"))
         
         GetSchwiiftyDB.MyProfessions[profInfo.professionName] = link
-        
-        -- Vi gemmer det også i Guild-listen under os selv med det samme
         GetSchwiiftyDB.GuildCrafters[myShortName] = GetSchwiiftyDB.GuildCrafters[myShortName] or {}
         GetSchwiiftyDB.GuildCrafters[myShortName][profInfo.professionName] = link
         
-        -- Fortæl brugeren at vi har fanget det!
         print("|cFF00FFFF[Get Schwiifty]|r Profession link saved: " .. profInfo.professionName)
         
         local packet = "PROF;" .. myShortName .. ";" .. profInfo.professionName .. ";" .. link
+        GS.Log("|cFF00FF00[SENDER]|r " .. packet)
         C_ChatInfo.SendAddonMessage("GetSchwiifty", packet, "GUILD")
         
         if GS.OpdaterCrafterTabel then GS.OpdaterCrafterTabel() end
@@ -70,10 +99,14 @@ local CraftingListener = CreateFrame("Frame")
 CraftingListener:RegisterEvent("CHAT_MSG_ADDON")
 CraftingListener:SetScript("OnEvent", function(self, event, prefix, text, channel, sender)
     if prefix == "GetSchwiifty" and GetSchwiiftyDB then
+        
+        -- Vi logger alt hvad der kommer ind
+        local shortSender = strsplit("-", sender)
+        GS.Log("|cFFFFFF00[MODTAGER FRA " .. shortSender .. "]|r " .. text)
+        
         if string.sub(text, 1, 5) == "PROF;" then
             local _, pName, profName, link = strsplit(";", text, 4) 
             if pName and profName and link then
-                -- Sørger for at fjerne servernavnet fra senderen også
                 local shortName = strsplit("-", pName)
                 
                 GetSchwiiftyDB.GuildCrafters[shortName] = GetSchwiiftyDB.GuildCrafters[shortName] or {}
@@ -87,6 +120,7 @@ CraftingListener:SetScript("OnEvent", function(self, event, prefix, text, channe
                 for pName, pLink in pairs(GetSchwiiftyDB.MyProfessions) do
                     C_Timer.After(math.random() * 2, function()
                         local packet = "PROF;" .. myShortName .. ";" .. pName .. ";" .. pLink
+                        GS.Log("|cFF00FF00[SENDER (Svar på Sync)]|r " .. packet)
                         C_ChatInfo.SendAddonMessage("GetSchwiifty", packet, "GUILD")
                     end)
                 end
@@ -100,11 +134,8 @@ end)
 -------------------------------------------------
 if C_CraftingOrders and C_CraftingOrders.PlaceNewOrder then
     hooksecurefunc(C_CraftingOrders, "PlaceNewOrder", function(orderInfo)
-        if GS_AutoAnnounceCheck:GetChecked() then
-            if orderInfo and orderInfo.orderType == Enum.CraftingOrderType.Guild then
-                local besked = "I just placed a new Guild Crafting Order! Please take a look if you can craft it."
-                SendChatMessage(besked, "GUILD")
-            end
+        if GS_AutoAnnounceCheck:GetChecked() and orderInfo and orderInfo.orderType == Enum.CraftingOrderType.Guild then
+            SendChatMessage("I just placed a new Guild Crafting Order! Please take a look if you can craft it.", "GUILD")
         end
     end)
 end
@@ -124,11 +155,11 @@ local headerY = -110
 local startX = 20
 
 local kolonner = {
-    {navn = "Crafter Name", bredde = 140},
-    {navn = "Guild Rank", bredde = 130},
-    {navn = "Level / Class", bredde = 160},
-    {navn = "Known Professions", bredde = 180},
-    {navn = "Action", bredde = 160} 
+    {navn = "Crafter Name", bredde = 130},
+    {navn = "Guild Rank", bredde = 110},
+    {navn = "Level / Class", bredde = 140},
+    {navn = "Known Professions", bredde = 160},
+    {navn = "Action", bredde = 250} -- Udvidet for at få plads til 3 knapper!
 }
 
 local currentX = startX
@@ -151,43 +182,37 @@ for i = 1, numRows do
     row:SetPoint("TOPLEFT", GS.CraftingTabContainer, "TOPLEFT", startX, rowY - ((i-1) * 20))
     
     row:SetBackdrop({bgFile = "Interface\\ChatFrame\\ChatFrameBackground"})
-    if i % 2 == 0 then
-        row:SetBackdropColor(1, 1, 1, 0.04) 
-    else
-        row:SetBackdropColor(1, 1, 1, 0.01) 
-    end
+    if i % 2 == 0 then row:SetBackdropColor(1, 1, 1, 0.04) else row:SetBackdropColor(1, 1, 1, 0.01) end
     
     row.felter = {}
     local feltX = 0
     for j, info in ipairs(kolonner) do
         if j == 5 then 
             local whisperBtn = CreateFrame("Button", nil, row, "UIPanelButtonTemplate")
-            whisperBtn:SetSize(75, 20)
+            whisperBtn:SetSize(70, 20)
             whisperBtn:SetPoint("LEFT", row, "LEFT", feltX, 0)
             whisperBtn:SetText("Whisper")
             whisperBtn:SetScript("OnClick", function(self)
                 if self.spillerNavn then ChatFrame_OpenChat("/w " .. self.spillerNavn .. " Hey, can you craft something for me? ") end
             end)
             
-            local recipeBtn = CreateFrame("Button", nil, row, "UIPanelButtonTemplate")
-            recipeBtn:SetSize(75, 20)
-            recipeBtn:SetPoint("LEFT", whisperBtn, "RIGHT", 5, 0)
-            recipeBtn:SetText("Recipes")
-            recipeBtn:SetScript("OnClick", function(self)
-                if self.crafterName then
-                    local cData = GetSchwiiftyDB.GuildCrafters[self.crafterName]
-                    if cData then
-                        print("|cFF00FFFF[Get Schwiifty]|r Found recipes for " .. self.crafterName .. ":")
-                        for pName, pLink in pairs(cData) do
-                            print("- " .. pLink)
-                            local linkString = pLink:match("|H(.-)|h")
-                            if linkString then SetItemRef(linkString, pLink, "LeftButton") end
-                        end
-                    end
-                end
+            -- Knap til Profession 1
+            local prof1Btn = CreateFrame("Button", nil, row, "UIPanelButtonTemplate")
+            prof1Btn:SetSize(85, 20)
+            prof1Btn:SetPoint("LEFT", whisperBtn, "RIGHT", 5, 0)
+            prof1Btn:SetScript("OnClick", function(self)
+                if self.link then local ls = self.link:match("|H(.-)|h"); if ls then SetItemRef(ls, self.link, "LeftButton") end end
+            end)
+            
+            -- Knap til Profession 2
+            local prof2Btn = CreateFrame("Button", nil, row, "UIPanelButtonTemplate")
+            prof2Btn:SetSize(85, 20)
+            prof2Btn:SetPoint("LEFT", prof1Btn, "RIGHT", 5, 0)
+            prof2Btn:SetScript("OnClick", function(self)
+                if self.link then local ls = self.link:match("|H(.-)|h"); if ls then SetItemRef(ls, self.link, "LeftButton") end end
             end)
 
-            row.felter[j] = { whisper = whisperBtn, recipe = recipeBtn }
+            row.felter[j] = { whisper = whisperBtn, prof1 = prof1Btn, prof2 = prof2Btn }
         else
             local fs = row:CreateFontString(nil, "OVERLAY", "GameFontHighlight")
             fs:SetSize(info.bredde - 5, 20)
@@ -222,30 +247,47 @@ GS.OpdaterCrafterTabel = function()
             local row = raekker[rowIndex]
             local colorInfo = RAID_CLASS_COLORS[classToken]
             local hexColor = colorInfo and colorInfo.colorStr or "ffffffff"
-            
-            -- HUSK AT KLIPPE SERVERNAVNET AF HER OGSÅ
             local shortName = strsplit("-", name)
             
             row.felter[1]:SetText(string.format("|c%s%s|r", hexColor, shortName))
             row.felter[2]:SetText(rankName)
             row.felter[3]:SetText("Lvl " .. level .. " " .. classDisplayName)
             
-            -- Nu leder vi kun efter "Schwiifty", ikke "Schwiifty-TwistingNether"
             local crafterData = GetSchwiiftyDB.GuildCrafters[shortName]
             if crafterData and next(crafterData) then
+                local pNames = {}
+                local pLinks = {}
                 local knownProfs = ""
-                for pName, _ in pairs(crafterData) do
+                
+                for pName, pLink in pairs(crafterData) do
+                    table.insert(pNames, pName)
+                    table.insert(pLinks, pLink)
                     knownProfs = knownProfs .. pName .. ", "
                 end
                 knownProfs = knownProfs:sub(1, -3) 
-                
                 row.felter[4]:SetText("|cff71d5ff" .. knownProfs .. "|r")
-                row.felter[5].recipe:Enable()
-                row.felter[5].recipe.crafterName = shortName
+                
+                -- Udfylder Knap 1
+                if pNames[1] then
+                    row.felter[5].prof1:Show()
+                    row.felter[5].prof1:SetText(pNames[1]:sub(1, 10)) -- Forkorter navnet let, f.eks "Blacksmith"
+                    row.felter[5].prof1.link = pLinks[1]
+                else
+                    row.felter[5].prof1:Hide()
+                end
+                
+                -- Udfylder Knap 2
+                if pNames[2] then
+                    row.felter[5].prof2:Show()
+                    row.felter[5].prof2:SetText(pNames[2]:sub(1, 10))
+                    row.felter[5].prof2.link = pLinks[2]
+                else
+                    row.felter[5].prof2:Hide()
+                end
             else
                 row.felter[4]:SetText("|cFF888888Unknown|r")
-                row.felter[5].recipe:Disable()
-                row.felter[5].recipe.crafterName = nil
+                row.felter[5].prof1:Hide()
+                row.felter[5].prof2:Hide()
             end
             
             row.felter[5].whisper.spillerNavn = shortName 
@@ -258,6 +300,7 @@ end
 
 RefreshCraftersBtn:SetScript("OnClick", function()
     GS.OpdaterCrafterTabel()
-    C_ChatInfo.SendAddonMessage("GetSchwiifty", "SYNC_REQUEST", "GUILD")
-    print("|cFFFFFF00[Get Schwiifty]|r Requesting updated profession data from the guild...")
+    local req = "SYNC_REQUEST"
+    GS.Log("|cFF00FF00[SENDER]|r " .. req)
+    C_ChatInfo.SendAddonMessage("GetSchwiifty", req, "GUILD")
 end)
